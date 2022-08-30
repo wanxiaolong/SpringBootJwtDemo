@@ -4,6 +4,7 @@ import com.demo.jwt.common.Constants;
 import com.demo.jwt.service.JwtUserDetailsService;
 import com.demo.jwt.util.JwtTokenUtil;
 import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.impl.Base64Codec;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -11,6 +12,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -31,13 +33,17 @@ import java.io.IOException;
 @Slf4j
 public class JwtRequestFilter extends OncePerRequestFilter {
 
-    private static final String TOKEN_PREFIX = "Bearer ";
+    private static final String BEARER_TOKEN_PREFIX = "Bearer ";
+    private static final String BASIC_TOKEN_PREFIX = "Basic ";
 
     @Autowired
     private JwtUserDetailsService userDetailService;
 
     @Autowired
     private JwtTokenUtil jwtTokenUtil;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -46,31 +52,43 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         final String tokenHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
         String username = null;
+        String password = null;
         String jwtToken = null;
 
-        // JWT token is in the form "Bearer [token]" format, thus need to remove the prefix.
-        if (tokenHeader != null && tokenHeader.startsWith(TOKEN_PREFIX)) {
-            jwtToken = tokenHeader.substring(TOKEN_PREFIX.length());
-            try {
-                username = jwtTokenUtil.getUsernameFromToken(jwtToken);
-            } catch (IllegalArgumentException e) {
-                logger.info("Unable to get username from token");
-            } catch (ExpiredJwtException e) {
-                logger.info("JwtToken has expired");
-                String isRefreshToken = request.getHeader("isRefreshToken");
-                String requestURL = request.getRequestURL().toString();
-                // allow for Refresh Token creation if following conditions are true.
-                if (isRefreshToken != null
-                        && isRefreshToken.equals("true")
-                        && requestURL.endsWith(Constants.URL_REFRESH_TOKEN)) {
-                    logger.info("Refreshing token");
-                    allowForRefreshToken(e, request);
-                } else {
-                    request.setAttribute("exception", e);
+        if (tokenHeader != null) {
+            // JWT token is in the format "Bearer [token]" format, thus need to remove the prefix.
+            if (tokenHeader.startsWith(BEARER_TOKEN_PREFIX)) {
+                jwtToken = tokenHeader.substring(BEARER_TOKEN_PREFIX.length());
+                try {
+                    username = jwtTokenUtil.getUsernameFromToken(jwtToken);
+                } catch (IllegalArgumentException e) {
+                    logger.info("Unable to get username from token");
+                } catch (ExpiredJwtException e) {
+                    logger.info("JwtToken has expired");
+                    String isRefreshToken = request.getHeader("isRefreshToken");
+                    String requestURL = request.getRequestURL().toString();
+                    // allow for Refresh Token creation if following conditions are true.
+                    if (isRefreshToken != null
+                            && isRefreshToken.equals("true")
+                            && requestURL.endsWith(Constants.URL_REFRESH_TOKEN)) {
+                        logger.info("Refreshing token");
+                        allowForRefreshToken(e, request);
+                    } else {
+                        request.setAttribute("exception", e);
+                    }
                 }
+            // Need to remove the "Basic " prefix.
+            } else if (tokenHeader.startsWith(BASIC_TOKEN_PREFIX)) {
+                String basicToken = tokenHeader.substring(BASIC_TOKEN_PREFIX.length());
+                String decoded[] = Base64Codec.BASE64.decodeToString(basicToken).split(":");
+                username = decoded[0].trim();
+                password = decoded[1].trim();
+                allowForGetToken(username, password, request);
+            } else {
+                logger.warn("Token has not begin with the \"Bearer\" or \"Basic\" prefix for URI: " + request.getRequestURI());
             }
         } else {
-            logger.warn("JwtToken has not begin with the \"Bearer\" prefix for URI: " + request.getRequestURI());
+            logger.warn("No Authorization header found");
         }
 
         // once we get the token, then begin to validate it
@@ -82,7 +100,7 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             // thus we load this user for authentication.
             UserDetails userDetails = userDetailService.loadUserByUsername(username);
             // validate this token
-            if (jwtTokenUtil.validateToken(jwtToken, userDetails)) {
+            if (jwtToken != null && jwtTokenUtil.validateToken(jwtToken, userDetails)) {
                 // if token is valid, configure Spring Security to set authentication object.
                 // note that the password filed is removed from the authentication object.
                 UsernamePasswordAuthenticationToken authenticationToken =
@@ -110,5 +128,15 @@ public class JwtRequestFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(usernamePasswordAuthenticationToken);
         // Set the claims so that in controller we will be using it to create new JWT
         request.setAttribute(Constants.ATTR_CLAIMS, ex.getClaims());
+    }
+
+    private void allowForGetToken(String username, String password, HttpServletRequest request) {
+        UserDetails userDetails = userDetailService.loadUserByUsername(username);
+        if (passwordEncoder.matches(password, userDetails.getPassword())) {
+            UsernamePasswordAuthenticationToken usernamePasswordAuthenticationToken =
+                    new UsernamePasswordAuthenticationToken(username, null, null);
+            SecurityContextHolder.getContext().setAuthentication(usernamePasswordAuthenticationToken);
+            request.setAttribute(Constants.ATTR_USERNAME, username);
+        }
     }
 }
