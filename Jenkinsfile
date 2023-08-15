@@ -1,5 +1,7 @@
 def sonarToken = 'squ_50b088233583a82f0353f1d0b448a3a86bfedff6'
 def sonarHostUrl = 'http://localhost:9000'
+def sonarProjectKey = 'SpringBootJwtDemo'
+def sonarProjectName = 'SpringBootJwtDemo'
 
 pipeline {
     agent any
@@ -40,7 +42,7 @@ pipeline {
             steps {
                 echo "STEP5 ---------- Sonar Scan..."
                 dir('SpringBootJwtDemo') {
-                    bat "mvn sonar:sonar -Dsonar.host.url=${sonarHostUrl} -Dsonar.token=${sonarToken}"
+                    bat "mvn sonar:sonar -Dsonar.host.url=${sonarHostUrl} -Dsonar.token=${sonarToken} -Dsonar.projectKey=${sonarProjectKey} -Dsonar.projectName=${sonarProjectName}"
                 }
             }
         }
