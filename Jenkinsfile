@@ -40,7 +40,7 @@ pipeline {
             steps {
                 echo "STEP5 ---------- Sonar Scan..."
                 dir('SpringBootJwtDemo') {
-                    bat "mvn sonar:sonar -Dsonar.host.url=${sonarHostUrl} -Dsonar.token=${sonarToken} -D"
+                    bat "mvn sonar:sonar -Dsonar.host.url=${sonarHostUrl} -Dsonar.token=${sonarToken}"
                 }
             }
         }
